@@ -57,7 +57,7 @@ class RSM:
         """
         result = self
 
-        for var, automaton in result.automata:
+        for var, automaton in result.automata.items():
             result.automata[var] = automaton.minimize()
 
         return result
