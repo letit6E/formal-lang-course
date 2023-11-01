@@ -29,12 +29,18 @@ class TestsForECFG:
         ecfg = ECFG.from_cfg(cfg)
 
         assert ecfg.start_symbol == cfg.start_symbol.value
-        assert set(ecfg.productions.keys()) == set(map(lambda tr: tr.head, cfg.productions))
+        assert set(ecfg.productions.keys()) == set(
+            map(lambda tr: tr.head, cfg.productions)
+        )
 
-        for cfg_head, ecfg_head in zip(map(lambda tr: tr.head, cfg.productions), ecfg.productions.keys()):
+        for cfg_head, ecfg_head in zip(
+            map(lambda tr: tr.head, cfg.productions), ecfg.productions.keys()
+        ):
             assert cfg_head.value == ecfg_head
 
-        for ecfg_regex, cfg_body in zip(ecfg.productions.values(), map(lambda tr: tr.body, cfg.productions)):
+        for ecfg_regex, cfg_body in zip(
+            ecfg.productions.values(), map(lambda tr: tr.body, cfg.productions)
+        ):
             values = list(map(lambda x: x.value, cfg_body))
             if values:
                 assert ecfg_regex.accepts(values)
