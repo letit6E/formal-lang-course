@@ -1,3 +1,5 @@
+from typing import Hashable
+
 from pyformlang.finite_automaton import NondeterministicFiniteAutomaton, State
 from scipy import sparse
 
@@ -61,12 +63,12 @@ class BoolMatrix:
                         self.states[start_state], self.states[finish_state]
                     ] = True
 
-    def intersect(self, another: "BoolMatrix") -> "BoolMatrix":
+    def intersect(self, other: "BoolMatrix") -> "BoolMatrix":
         """Intersects a bool matrix with another bool matrix using the tensor product
 
         Parameters
         ----------
-        another : BoolMatrix
+        other : BoolMatrix
             Another bool matrix to intersect
 
         Returns
@@ -77,33 +79,32 @@ class BoolMatrix:
         """
         result = BoolMatrix()
 
-        for symbol in self.matrices.keys() & another.matrices.keys():
+        for symbol in self.matrices.keys() & other.matrices.keys():
             result.matrices[symbol] = sparse.kron(
-                self.matrices[symbol], another.matrices[symbol], format="csr"
+                self.matrices[symbol], other.matrices[symbol], format="csr"
             )
 
         for self_state, self_index in self.states.items():
-            for other_state, other_index in another.states.items():
-                result_state = self_index * len(another.states) + other_index
+            for other_state, other_index in other.states.items():
+                result_state = self_index * len(other.states) + other_index
                 result.states[(self_state, other_state)] = result_state
 
                 if (
                     self_index in self.start_states
-                    and other_index in another.start_states
+                    and other_index in other.start_states
                 ):
                     result.start_states.add(result_state)
 
                 if (
                     self_index in self.final_states
-                    and other_index in another.final_states
+                    and other_index in other.final_states
                 ):
                     result.final_states.add(result_state)
 
         return result
 
     def transitive_closure(self) -> sparse.csr_matrix:
-        """
-        Returns the transitive closure of the given bool matrix
+        """Returns the transitive closure of the given bool matrix
 
         Returns
         ----------
@@ -148,3 +149,160 @@ class BoolMatrix:
             nfa.add_final_state(state)
 
         return nfa
+
+    def direct_sum(self, other: "BoolMatrix") -> "BoolMatrix":
+        """Returns a direct sum of bool matrices
+
+        Parameters
+        ----------
+        other : BoolMatrix
+            Another bool matrix to summation
+
+        Returns
+        -------
+        result : BoolMatrix
+            Direct sum of inputted matrices
+
+        """
+        result = BoolMatrix()
+
+        for symbol in self.matrices.keys() & other.matrices.keys():
+            result.matrices[symbol] = sparse.bmat(
+                [
+                    [self.matrices[symbol], None],
+                    [None, other.matrices[symbol]],
+                ]
+            )
+
+        ptr = 0
+        for state, i in self.states.items():
+            result.states[(state, State(0))] = ptr
+            if i in self.start_states:
+                result.start_states.add(ptr)
+            ptr += 1
+        for state, i in other.states.items():
+            result.states[(state, State(1))] = ptr
+            if i in other.start_states:
+                result.start_states.add(ptr)
+            ptr += 1
+
+        return result
+
+    def build_front_matrix(
+        self, other: "BoolMatrix", separate_flag: bool
+    ) -> sparse.csr_matrix:
+        """Make front csr matrix for bfs
+
+        Parameters
+        ----------
+        other : BoolMatrix
+            Another bool matrix to make front
+
+        separate_flag : bool
+            Flag for separated/not separated with start states result
+
+        Returns
+        -------
+        result : sparse.csr_matrix
+            Front csr matrix
+
+        """
+        size = (len(other.states), len(self.states) + len(other.states))
+        if not self.start_states:
+            return sparse.csr_matrix(size)
+
+        specials = [sparse.lil_matrix(size) for _ in range(len(self.start_states))]
+        for _, i in other.states.items():
+            for index, state in enumerate(self.start_states):
+                specials[index][i, i] = True
+                if i in other.start_states:
+                    specials[index][i, state + size[0]] = True
+
+        if not separate_flag:
+            return sum(specials, start=sparse.lil_matrix(size)).tocsr()
+
+        return sparse.csr_matrix(sparse.vstack([matrix.tocsr() for matrix in specials]))
+
+    @staticmethod
+    def validate_front(front: sparse.csr_matrix, bound: int) -> sparse.csr_matrix:
+        """Validate front matrix for bfs
+
+        Parameters
+        ----------
+        front : sparse.csr_matrix
+            Original front matrix
+
+        bound : int
+            Number of states in bool matrix with transitions in bfs
+
+        Returns
+        -------
+        validated : sparse.csr_matrix
+            Validated front matrix
+
+        """
+        validated = sparse.lil_array(front.shape)
+
+        for i, j in zip(*front.nonzero()):
+            if j < bound:
+                right = front.getrow(i).tolil()[[0], bound:]
+
+                if right.nnz > 0:
+                    shift = i // bound * bound
+                    validated[shift + j, j] = 1
+                    validated[[shift + j], bound:] += right
+
+        return validated.tocsr()
+
+    def bfs(self, other: "BoolMatrix", separate_flag: bool = False) -> set[Hashable]:
+        """Returns reachable nodes in self with travelling other
+        in two modes: separated (for every start state),
+        not separated (for all start state)
+
+        Parameters
+        ----------
+        other : BoolMatrix
+            Another Bool Matrix
+
+        separate_flag : bool
+            Separated / not separated mode flag
+
+        Returns
+        -------
+        result : set[Hashable]
+            set[nodes] for not separated mode
+            set[(start_node, final_node)] for separated mode
+
+        """
+        matrices = other.direct_sum(self).matrices
+        symbols = self.matrices.keys() & other.matrices.keys()
+        other_states_len = len(other.states)
+
+        visited = self.build_front_matrix(other, separate_flag)
+        prev = -1
+        while visited.nnz != prev:
+            prev = visited.nnz
+
+            for symbol in symbols:
+                special = visited @ matrices[symbol]
+                visited += BoolMatrix.validate_front(special, other_states_len)
+
+        index_to_states = {i: name for name, i in self.states.items()}
+        start_states = list(self.start_states)
+        result = set()
+        for i, j in zip(*visited.nonzero()):
+            if (
+                j - other_states_len in self.final_states
+                and (i % other_states_len) in other.final_states
+            ):
+                if separate_flag:
+                    result.add(
+                        (
+                            index_to_states[start_states[i // other_states_len]],
+                            index_to_states[j - other_states_len],
+                        )
+                    )
+                else:
+                    result.add(index_to_states[j - other_states_len])
+
+        return result
