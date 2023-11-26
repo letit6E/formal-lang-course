@@ -1,13 +1,10 @@
-import queue
-from typing import Any
-
 from networkx import MultiDiGraph
 from pyformlang.cfg import CFG, Variable
 
 from project.cfg.transformers import transform_to_wcnf
 
 
-def cfpq_all(cfg: CFG, graph: MultiDiGraph) -> set[tuple[Any, Variable, Any]]:
+def cfpq_all(cfg: CFG, graph: MultiDiGraph) -> set[tuple[any, Variable, any]]:
     """Executes the Hellings algorithm for all the pair of nodes in a graph using the specified grammar.
 
     Parameters
@@ -82,7 +79,7 @@ def cfpq(
     start_nodes: set = None,
     final_nodes: set = None,
     start_symbol: str = None,
-) -> set[tuple[Any, Any]]:
+) -> set[tuple[any, any]]:
     """Computes the context-free path querying (CFPQ) for the given graph and grammar.
 
     The function performs the Hellings-based algorithm for CFPQ, but only adds the paths
@@ -103,7 +100,7 @@ def cfpq(
 
     Returns
     -------
-    set[tuple[Any, Any]]
+    set[tuple[any, any]]
         A set of tuples representing the start and end nodes of the paths in the graph
         that are valid according to the specified context-free grammar.
 
